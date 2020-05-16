@@ -24,11 +24,11 @@
 #include <simple_new_handler.h>
 
 #include <getopt.h>
-#include <signal.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 
 #include <cassert>
+#include <csignal>
 #include <exception>
 #include <iostream>
 #include <new>
@@ -36,13 +36,24 @@
 
 static size_t const MB = 1024 * 1024;
 static size_t alloc_count = 0;
+static bool do_chain = false;
 static bool debug = false;
 static bool have_signal = false;
 
 static void TerminateHandler() {
   // Do normal exit instead of abort
+  assert(!do_chain);
   if (debug) {
     std::cout << "Terminated at " << (alloc_count + 1) << " MB\n";
+  }
+
+  exit(0);
+}
+
+static void ChainedHandler() {
+  assert(do_chain);
+  if (debug) {
+    std::cout << "Chained handler at " << (alloc_count + 1) << " MB\n";
   }
 
   exit(0);
@@ -54,8 +65,8 @@ static void SignalHandler(int signo) {
 }
 
 static void usage() {
-  std::cout
-      << "usage: test_xnew_handler [--debug][--signal] [memory-limit-in-mbs]\n";
+  std::cout << "usage: test_simple_new__handler [--debug][--signal] [--chain] "
+               "[memory-limit-in-mbs]\n";
   std::cout << "\n";
 }
 
@@ -63,13 +74,22 @@ int main(int argc, char** argv) {
   size_t limit = 200;
   int signo = 0;
 
-  static struct option long_options[] = {{"debug", no_argument, 0, 1},
-                                         {"help", no_argument, 0, 2},
-                                         {"signal", no_argument, 0, 3},
+#if __APPLE__
+  // We cannot run this test on macos because it ignores
+  // setrlimit settings
+  //
+  std::cout << "We cannot run this test on MacOS" << std::endl;
+  return 1;
+#endif
+
+  static struct option long_options[] = {{"chain", no_argument, 0, 1},
+                                         {"debug", no_argument, 0, 2},
+                                         {"help", no_argument, 0, 3},
+                                         {"signal", no_argument, 0, 4},
                                          {0, 0, 0, 0}};
 
   for (;;) {
-    int c = getopt_long(argc, argv, "dhs", long_options, 0);
+    int c = getopt_long(argc, argv, "cdhs", long_options, 0);
 
     if (c < 0) {
       break;
@@ -77,16 +97,21 @@ int main(int argc, char** argv) {
 
     switch (c) {
       case 1:
+      case 'c':
+        do_chain = true;
+        break;
+
+      case 2:
       case 'd':
         debug = true;
         break;
 
-      case 2:
+      case 3:
       case 'h':
         usage();
         return 0;
 
-      case 3:
+      case 4:
       case 's':
         signo = SIGUSR1;
         break;
@@ -123,7 +148,7 @@ int main(int argc, char** argv) {
   std::signal(signo, SignalHandler);
 
   // Set 200MB limit
-  rlimit rl{limit * MB, limit * MB};
+  rlimit rl = {limit * MB, limit * MB};
 
   int res = setrlimit(RLIMIT_AS, &rl);
   assert(res == 0);
@@ -136,13 +161,17 @@ int main(int argc, char** argv) {
   assert(!fullState.final_block_allocated);
   assert(fullState.reserved_block_size == 0);
   assert(fullState.reserved_block_count == 0);
-  assert(fullState.allocated_block_count == 0);
-  assert(fullState.available_block_count == 0);
+  assert(fullState.state.allocated_block_count == 0);
+  assert(fullState.state.available_block_count == 0);
+
+  if (do_chain) {
+    std::set_new_handler(ChainedHandler);
+  }
 
   // Init with 10 spare chunks
   // 10 MB each cnhunk
   // and 1K reserve
-  simple::NewHandler::Init(1024, 10, 10 * MB, signo);
+  simple::NewHandler::Init(1024, 10, 10 * MB, signo, do_chain);
 
   // Set terminate handler to print reached allocation level
   std::set_terminate(TerminateHandler);
@@ -151,12 +180,14 @@ int main(int argc, char** argv) {
 
   assert(fullState.init_done);
   assert(fullState.signo == signo);
+  assert(fullState.chained == do_chain);
   assert(fullState.final_block_size == 1024);
   assert(fullState.final_block_allocated);
   assert(fullState.reserved_block_size == 10 * MB);
   assert(fullState.reserved_block_count == 10);
-  assert(fullState.allocated_block_count <= 10);
-  assert(fullState.available_block_count == fullState.allocated_block_count);
+  assert(fullState.state.allocated_block_count <= 10);
+  assert(fullState.state.available_block_count ==
+         fullState.state.allocated_block_count);
 
   simple::NewHandler::State state = simple::NewHandler::GetState();
 

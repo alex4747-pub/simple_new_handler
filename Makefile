@@ -1,7 +1,7 @@
-.PHONY: all test cpplint
+.PHONY: all test clean formam tidy cpplint
 
 FORMAT   = clang-format
-TIDY   = clang-tidy
+TIDY     = clang-tidy
 CPPLINT = cpplint
 
 all:
@@ -22,7 +22,7 @@ tidy:
 	cd test; $(MAKE) tidy
 
 cpplint:
-	$(CPPLINT) ../include/xnew_handler.h
+	$(CPPLINT) ../include/simple_new_handler.h
 	cd test; $(MAKE) cpplint
 
 

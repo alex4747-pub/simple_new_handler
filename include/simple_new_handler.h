@@ -18,11 +18,12 @@
 // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+//
 
 // NOLINT(build/header_guard)
-
-#ifndef _INCLUDE_SIMPLE_NEW_HANDLER_H_
-#define _INCLUDE_SIMPLE_NEW_HANDLER_H_
+//
+#ifndef INCLUDE_SIMPLE_NEW_HANDLER_H_
+#define INCLUDE_SIMPLE_NEW_HANDLER_H_
 
 #include <csignal>
 #include <cstdint>
@@ -33,6 +34,21 @@
 #include <new>
 #include <utility>
 
+// Let us make use of modern c++ functionality
+// while being backward compatible with classic
+//
+// If NOEXCEPT is already defined hopefully it has
+// correct value
+//
+#ifndef NOEXCEPT
+#define NOEXCEPT_DEFINED 1
+#if __cplusplus >= 201103L
+#define NOEXCEPT noexcept
+#else
+#define NOEXCEPT
+#endif
+#endif
+
 namespace simple {
 
 class NewHandler {
@@ -41,55 +57,66 @@ class NewHandler {
   //
   // If not enough memory allocate as many blocks as possible
   //
-  static void Init(size_t finalBlockSize = 0, size_t reservedBlockCount = 0,
-                   size_t reservedBlockSize = 0, int signo = 0) {
-    GetWorker().Init(finalBlockSize, reservedBlockCount, reservedBlockSize,
-                     signo);
+  static void Init(size_t final_block_size = 0, size_t reserved_block_count = 0,
+                   size_t reserved_block_size = 0, int signo = 0,
+                   bool allow_chain = false) NOEXCEPT {
+    GetWorker().Init(final_block_size, reserved_block_count,
+                     reserved_block_size, signo, allow_chain);
   }
 
+  // Basic state
+  //
   struct State {
+    State() NOEXCEPT : allocated_block_count(0), available_block_count(0) {}
+
     size_t allocated_block_count;
     size_t available_block_count;
   };
 
-  static State GetState() { return GetWorker().GetState(); }
-
   // Full state
+  //
   struct FullState {
+    FullState() NOEXCEPT : init_done(),
+                           signo(),
+                           final_block_size(),
+                           final_block_allocated(),
+                           reserved_block_size(),
+                           reserved_block_count(),
+                           state() {}
+    State GetState() const NOEXCEPT { return state; }
     bool init_done;
+    bool chained;
     int signo;
     size_t final_block_size;
     bool final_block_allocated;
     size_t reserved_block_size;
     size_t reserved_block_count;
-    size_t allocated_block_count;
-    size_t available_block_count;
+    State state;
   };
 
-  static FullState GetFullState() { return GetWorker().GetFullState(); }
+  static State GetState() NOEXCEPT { return GetWorker().GetState(); }
+
+  static FullState GetFullState() NOEXCEPT {
+    return GetWorker().GetFullState();
+  }
 
  private:
   class Worker;
 
-  static void Process() { GetWorker().Process(); }
+  static void Process() NOEXCEPT { GetWorker().Process(); }
 
-  static Worker& GetWorker() {
+  static Worker& GetWorker() NOEXCEPT {
     static Worker worker_;
     return worker_;
   }
 
   class Worker {
    public:
-    Worker()
-        : init_done_(),
-          signo_(),
-          final_block_size_(),
-          reserved_block_size_(),
-          reserved_block_count_(),
-          allocated_block_count_(),
-          available_block_count_(),
-          final_block_(),
-          blk_arr_list_() {}
+    Worker() NOEXCEPT : full_state_(),
+                        available_block_count_(),
+                        final_block_(),
+                        blk_arr_list_(),
+                        prev_handler_() {}
 
     // Note on concurrency:
     //
@@ -99,129 +126,137 @@ class NewHandler {
     // The environment guarantees that
     // the handler call itself is thread safe.
     //
-    // Volatile is good enough for reporting purposes
-    // because we do not care about race condition
-    // between actual and reported usage
+    // We do not care about race condition between
+    // setting and reading available_block_count
+    // so using int-sized integer provides enough
+    // atomicity, to return either value before or
+    // value after the change.
     //
-    void Init(size_t finalBlockSize = 0, size_t reservedBlockCount = 0,
-              size_t reservedBlockSize = 0, int signo = 0) {
-      if (init_done_) {
+    void Init(size_t final_block_size = 0, size_t reserved_block_count = 0,
+              size_t reserved_block_size = 0, int signo = 0,
+              bool allow_chain = false) NOEXCEPT {
+      if (full_state_.init_done) {
         // We expect to be done once and it is done
         // more than once we do not care much
         return;
       }
 
-      final_block_size_ = finalBlockSize;
+      full_state_.init_done = true;
+      full_state_.signo = signo;
+      full_state_.final_block_size = final_block_size;
+      full_state_.reserved_block_count = reserved_block_count;
+      full_state_.reserved_block_size = reserved_block_size;
 
       size_t finalSize =
-          (final_block_size_ + sizeof(Blk) - 1) / sizeof(Blk) * sizeof(Blk);
+          (final_block_size + sizeof(Blk) - 1) / sizeof(Blk) * sizeof(Blk);
 
       if (finalSize) {
         final_block_ = new (std::nothrow) Blk[finalSize / sizeof(Blk)];
 
         if (final_block_) {
+          full_state_.final_block_allocated = true;
+
           // Assign a value to map allocated block
+          //
           final_block_->m_next = 0;
         }
       }
 
-      reserved_block_count_ = reservedBlockCount;
+      unsigned int block_limit = std::numeric_limits<unsigned int>::max();
 
-      unsigned int blockLimit = std::numeric_limits<unsigned int>::max();
+      // We always allocate and immediately free extra block
+      // to support the strategy of managing all available
+      // memory through this mechanism
+      //
+      if ((reserved_block_count + 1) < block_limit)
+        block_limit = static_cast<unsigned int>(reserved_block_count + 1);
 
-      if (reserved_block_count_ < blockLimit)
-        blockLimit = static_cast<unsigned int>(reserved_block_count_);
+      if (reserved_block_count && reserved_block_size) {
+        size_t reserved_arr_size =
+            (reserved_block_size + sizeof(Blk) - 1) / sizeof(Blk);
 
-      reserved_block_size_ = reservedBlockSize;
+        for (unsigned int ii = 0; ii < block_limit; ii++) {
+          Blk* blk_arr = new (std::nothrow) Blk[reserved_arr_size];
 
-      if (reserved_block_count_ && reserved_block_size_) {
-        size_t reservedSize = (reserved_block_size_ + sizeof(Blk) - 1) /
-                              sizeof(Blk) * sizeof(Blk);
-
-        for (unsigned int ii = 0; ii < blockLimit; ii++) {
-          Blk* blkArr = new (std::nothrow) Blk[reservedSize / sizeof(Blk)];
-
-          if (!blkArr) {
-            allocated_block_count_ = ii;
+          if (!blk_arr) {
+            full_state_.state.allocated_block_count = ii - 1;
+            full_state_.state.available_block_count = ii - 1;
+            available_block_count_ = ii - 1;
             break;
           }
 
-          blkArr[0].m_next = blk_arr_list_;
-          blk_arr_list_ = blkArr;
+          blk_arr[0].m_next = blk_arr_list_;
+          blk_arr_list_ = blk_arr;
         }
 
-        if (blk_arr_list_ && !allocated_block_count_) {
+        if (blk_arr_list_ && full_state_.state.allocated_block_count == 0) {
           // All reserved blocks were allocated
-          allocated_block_count_ = blockLimit;
+          //
+          full_state_.state.allocated_block_count = block_limit;
+          full_state_.state.available_block_count = block_limit;
+          available_block_count_ = block_limit;
         }
 
-        available_block_count_ = allocated_block_count_;
+        if (blk_arr_list_) {
+          // Immediately release the last block
+          //
+          Blk* blk_arr = blk_arr_list_;
+          blk_arr_list_ = blk_arr[0].m_next;
+
+          delete[] blk_arr;
+
+          full_state_.state.allocated_block_count--;
+          full_state_.state.available_block_count--;
+          available_block_count_--;
+        }
       }
 
-      signo_ = signo;
-
-      std::set_new_handler(NewHandler::Process);
-
-      init_done_ = true;
-    }
-
-    State GetState() const volatile {
-      State s;
-
-      memset(&s, 0, sizeof(s));
-
-      if (!init_done_) {
-        return s;
+      if (!allow_chain) {
+        std::set_new_handler(NewHandler::Process);
+        return;
       }
 
-      s.allocated_block_count = allocated_block_count_;
-      s.available_block_count = available_block_count_;
+      prev_handler_ = std::set_new_handler(NewHandler::Process);
 
-      return s;
-    }
-
-    FullState GetFullState() const volatile {
-      FullState s;
-
-      memset(&s, 0, sizeof(s));
-
-      if (!init_done_) {
-        return s;
+      if (prev_handler_) {
+        full_state_.chained = true;
       }
-
-      s.init_done = true;
-      s.signo = signo_;
-      s.final_block_size = final_block_size_;
-      if (final_block_) s.final_block_allocated = true;
-      s.reserved_block_size = reserved_block_size_;
-      s.reserved_block_count = reserved_block_count_;
-      s.allocated_block_count = allocated_block_count_;
-      s.available_block_count = available_block_count_;
-
-      return s;
     }
 
-    void Process() {
-      Blk* curBlkArr = blk_arr_list_;
+    State GetState() const NOEXCEPT { return full_state_.GetState(); }
 
-      if (curBlkArr) {
+    FullState GetFullState() const NOEXCEPT { return full_state_; }
+
+    void Process() NOEXCEPT {
+      Blk* blk_arr = blk_arr_list_;
+
+      if (blk_arr) {
         // Release the first avalable block to the process
         // and raise signal if configured
-        blk_arr_list_ = curBlkArr[0].m_next;
+        blk_arr_list_ = blk_arr[0].m_next;
 
-        delete[] curBlkArr;
+        delete[] blk_arr;
 
-        if (available_block_count_ > 0) available_block_count_--;
+        if (available_block_count_ > 0) {
+          available_block_count_--;
+          full_state_.state.available_block_count = available_block_count_;
+        }
 
-        if (signo_ != 0) std::raise(signo_);
+        if (full_state_.signo != 0) std::raise(full_state_.signo);
 
         return;
       }
 
-      // Release final block and terminate
+      // Release final block and terminate or call chained handler
       delete[] final_block_;
       final_block_ = 0;
-      std::terminate();
+
+      if (prev_handler_) {
+        std::set_new_handler(prev_handler_);
+        prev_handler_();
+      } else {
+        std::terminate();
+      }
     }
 
    private:
@@ -229,17 +264,21 @@ class NewHandler {
       Blk* m_next;
     };
 
-    bool init_done_;
-    int signo_;
-    size_t final_block_size_;
-    size_t reserved_block_size_;
-    size_t reserved_block_count_;
-    unsigned int allocated_block_count_;
-    volatile unsigned int available_block_count_;
+    FullState full_state_;
+    unsigned int available_block_count_;
     Blk* final_block_;
     Blk* blk_arr_list_;
+    std::new_handler prev_handler_;
   };
 };
 }  // namespace simple
 
-#endif  // _INCLUDE_SIMPLE_NEW_HANDLER_H_
+// If noexcept was defined in this
+// file, clean it up
+//
+#ifdef NOEXCEPT_DEFINED
+#undef NOEXCEPT
+#undef NOEXCEPT_DEFINED
+#endif
+
+#endif  // INCLUDE_SIMPLE_NEW_HANDLER_H_

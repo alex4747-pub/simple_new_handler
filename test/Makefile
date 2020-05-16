@@ -11,8 +11,8 @@ CXX = g++
 LIBS = -lstdc++
 endif
 
-FORMAT   = clang-format
-TIDY   = clang-tidy
+FORMAT  = clang-format
+TIDY    = clang-tidy
 CPPLINT = cpplint
 
 all: test_simple_new_handler test_simple_new_handler_std
@@ -33,7 +33,7 @@ cpplint:
 	$(CPPLINT) test_simple_new_handler.cc ../include/simple_new_handler.h
 
 clean:
-	rm -rf test_simple_new_handler test_simple_new_handler_std *~
+	rm -rf test_simple_new_handler test_simple_new_handler_std *~ *.dSYM
 
 run-test: test_simple_new_handler test_simple_new_handler_std
 	@echo
@@ -54,6 +54,9 @@ run-test: test_simple_new_handler test_simple_new_handler_std
 	@echo
 	@echo "Std-test with signal"
 	./test_simple_new_handler_std -s
+	@echo
+	@echo "Test with chain and debug"
+	./test_simple_new_handler -c --debug
 	@echo
 
 
