@@ -1,5 +1,5 @@
 STD=-std=c++11
-CXXFLAGS = -g -O0 -I../include
+CXXFLAGS = -g -O0 -I..
 
 USE_GCC=
 
@@ -17,20 +17,20 @@ CPPLINT = cpplint
 
 all: test_simple_new_handler test_simple_new_handler_std
 
-test_simple_new_handler: test_simple_new_handler.cc ../include/simple_new_handler.h Makefile
+test_simple_new_handler: test_simple_new_handler.cc ../simple_new_handler.h Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $< $(LIBS)
 
-test_simple_new_handler_std: test_simple_new_handler.cc ../include/simple_new_handler.h Makefile
+test_simple_new_handler_std: test_simple_new_handler.cc ../simple_new_handler.h Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(STD) $< $(LIBS)
 
 format:
 	$(FORMAT) --style=google -i test_simple_new_handler.cc
 
 tidy:
-	$(TIDY) --fix -extra-arg-before=-xc++ test_simple_new_handler.cc ../include/simple_new_handler.h -- $(CXXFLAGS) $(STD)
+	$(TIDY) --fix -extra-arg-before=-xc++ test_simple_new_handler.cc ../simple_new_handler.h -- $(CXXFLAGS) $(STD)
 
 cpplint:
-	$(CPPLINT) test_simple_new_handler.cc ../include/simple_new_handler.h
+	$(CPPLINT) test_simple_new_handler.cc ../simple_new_handler.h
 
 clean:
 	rm -rf test_simple_new_handler test_simple_new_handler_std *~ *.dSYM
