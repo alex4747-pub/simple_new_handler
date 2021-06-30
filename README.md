@@ -1,3 +1,7 @@
+# C++ Version
+The required version is c++17. The code that supports
+older version is 'legacy' subdirectory.
+
 # Simple C++ New-Handler
 
 This is a trivial include-only handler that provides meaningful functionality
@@ -36,7 +40,7 @@ initialization before starting multi-threading.
 
 ### Prerequisites
 
-There are no prerequisites
+Tests and examples are linux-specific because they set memory limit for the process.
 
 ### Installing
 

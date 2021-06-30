@@ -1,4 +1,4 @@
-STD=-std=c++17
+STD=-std=c++11
 CXXFLAGS = -g -O0 -I..
 
 USE_GCC=yes
@@ -15,9 +15,12 @@ FORMAT  = clang-format
 TIDY    = clang-tidy
 CPPLINT = cpplint
 
-all: test_simple_new_handler
+all: test_simple_new_handler test_simple_new_handler_std
 
 test_simple_new_handler: test_simple_new_handler.cc ../simple_new_handler.h Makefile
+	$(CXX) -o $@ $(CXXFLAGS) $< $(LIBS)
+
+test_simple_new_handler_std: test_simple_new_handler.cc ../simple_new_handler.h Makefile
 	$(CXX) -o $@ $(CXXFLAGS) $(STD) $< $(LIBS)
 
 format:
@@ -30,11 +33,11 @@ cpplint:
 	$(CPPLINT) test_simple_new_handler.cc ../simple_new_handler.h
 
 clean:
-	rm -rf test_simple_new_handler *~ *.dSYM
+	rm -rf test_simple_new_handler test_simple_new_handler_std *~ *.dSYM
 
 # Note: test-with-debug and very small memory
 # handles case where no blocks could be allocated
-run-test: test_simple_new_handler
+run-test: test_simple_new_handler test_simple_new_handler_std
 	@echo
 	@echo "Test with all defaults"
 	./test_simple_new_handler
@@ -48,8 +51,14 @@ run-test: test_simple_new_handler
 	@echo "Test with debug and very small memory"
 	./test_simple_new_handler --debug 10
 	@echo
+	@echo "Std-test with all defaults"
+	./test_simple_new_handler_std
+	@echo
 	@echo "Test with signal"
 	./test_simple_new_handler -s
+	@echo
+	@echo "Std-test with signal"
+	./test_simple_new_handler_std -s
 	@echo
 	@echo "Test with chain and debug"
 	./test_simple_new_handler -c --debug
