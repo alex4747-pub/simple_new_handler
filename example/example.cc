@@ -42,11 +42,6 @@ static void TerminateHandler() {
   exit(0);
 }
 
-static void usage() {
-  std::cout << "usage: example";
-  std::cout << "\n";
-}
-
 // The example is simple
 //
 // 1. Configure low memory limit
@@ -54,7 +49,7 @@ static void usage() {
 // 3. Simulate a memory leak
 // 4. Make sure terminate was called.
 //
-int main(int argc, char** argv) {
+int main(int, char**) {
   //////////////////////////////////////////////////////
   // Set terminate handler to print reached allocation level
   std::set_terminate(TerminateHandler);
