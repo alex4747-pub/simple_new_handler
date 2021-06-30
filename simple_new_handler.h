@@ -50,9 +50,6 @@ class NewHandler {
                    size_t reserved_block_size = 0, int signo = 0,
                    bool allow_chain = false) noexcept;
 
-  // The new-driver entry function
-  static void Process() noexcept;
-
   // Basic state
   //
   struct State {
@@ -89,6 +86,9 @@ class NewHandler {
   static FullState GetFullState() noexcept { return full_state_; }
 
  private:
+  // The new-driver entry function
+  static void Process() noexcept;
+
   struct Blk {
     Blk* m_next;
   };
