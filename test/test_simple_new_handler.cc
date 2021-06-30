@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
   try {
     for (alloc_count = 0; alloc_count < 10000000; alloc_count++) {
       char* p = new char[1024 * 1024];
-      (void)p;
+      *p = 'a'; // Map allocated block
 
       if (debug) {
         std::cout << "Allocated " << (alloc_count + 1) << " MB\n";
