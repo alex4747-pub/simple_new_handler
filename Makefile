@@ -12,6 +12,7 @@ test:
 clean:
 	rm -rf *~
 	cd test; $(MAKE) clean
+	cd example; $(MAKE) clean
 
 format:
 	$(FORMAT) --style=google -i ./simple_new_handler.h
